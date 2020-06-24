@@ -1,12 +1,14 @@
 # Analyze char vs character matchups
 # Analyze which stages are good for a character in general
 # If there's enough data, analyze stages for a character against other chars
+import datetime
 import json
 import sys
 
 from graphqlclient import GraphQLClient
 import pandas as pd
 import ratelimiter
+import urllib
 
 # TODO this should be a config file
 TOKEN_FILE = 'token.txt'
@@ -15,6 +17,15 @@ OUT_FILE = 'game_data.csv'
 API_URL = 'https://api.smash.gg/gql/'
 API_VERSION = 'alpha'
 ULTIMATE_ID = 1386 # This is smash.gg's internal representation of smash ultimate
+
+
+def add_months(sourcedate, months):
+    """https://stackoverflow.com/questions/4130922/how-to-increment-datetime-by-custom-months-in-python-without-using-library"""
+    month = sourcedate.month - 1 + months
+    year = sourcedate.year + month // 12
+    month = month % 12 + 1
+    return datetime.datetime(year, month, 1)
+
 
 def parse_id_to_char_file(in_file):
     id_to_char = {}
@@ -30,9 +41,14 @@ def parse_id_to_char_file(in_file):
 @ratelimiter.RateLimiter(max_calls=60, period=60)
 def call_api(query, params, client):
     """ A wrapper for api calls so we can respect the rate limit """
-    result = json.loads(client.execute(query, params))
-
-    return result
+    not_done = True
+    while not_done:
+        try:
+            result = json.loads(client.execute(query, params))
+            return result
+        except urllib.error.HTTPError:
+            print('520 error')
+            pass
 
 
 def event_is_ultimate(event: dict) -> bool:
@@ -53,21 +69,23 @@ def event_is_ultimate(event: dict) -> bool:
     except KeyError:
         return False
 
+def update_start(tournaments):
+    """Update the start date for the tournaments query based on the most recent data"""
+    # This is fragile, but should only have to work like twice
+    return tournaments[0]['events'][0]['createdAt']
+
 
 def get_ultimate_events(client):
-    # TODO implement logic to iterate over all tourneys
-    # Done is denoted by result.data.tournaments.nodes being None
     event_ids = set()
-    query = '''query TournamentsByVideogame($perPage: Int!, $videogameId: ID!, $page: Int!) {
+    query = '''query TournamentsByVideogame($perPage: Int!, $page: Int!, $video_game: ID! $after: Timestamp!, $before: Timestamp!) {
                 tournaments(query: {
                     perPage: $perPage
                     page: $page
-                    sortBy: "startAt asc"
                     filter: {
-                    past: false
-                    videogameIds: [
-                        $videogameId
-                    ]
+                      afterDate: $after
+                      beforeDate: $before
+                      past: true
+                      videogameIds: [$video_game]
                     }
                 }) {
                     nodes {
@@ -76,6 +94,7 @@ def get_ultimate_events(client):
                       events(limit: 100) {
                         id
                         name
+                        createdAt
                         isOnline
                         state
                         videogame{
@@ -87,35 +106,57 @@ def get_ultimate_events(client):
                 },
             '''
 
+
     done_iterating = False
-    i = 1
-    while not done_iterating:
-        parameters = {'page': i, 'perPage': 20, 'videogameId': ULTIMATE_ID}
+    today = datetime.datetime.now()
+    start_date = datetime.datetime(2018, 12, 1)
+    next_date = add_months(start_date, 1)
 
-        result = call_api(query, parameters, client)
+    while start_date < today:
+        print(start_date, next_date)
+        i = 1
 
-        tournaments = result['data']['tournaments']['nodes']
-        if tournaments is None:
-            done_iterating = True
-            break
+        start_stamp = int(start_date.timestamp())
+        next_stamp = int(next_date.timestamp())
 
-        for tournament in tournaments:
-            events = tournament['events']
-            for event in events:
-                # Keep only smash ultimate online matches from completed events
-                if not event_is_ultimate(event):
+        while True:
+            parameters = {'page': i, 'perPage': 30, 'video_game': ULTIMATE_ID,  'after': start_stamp, 'before': next_stamp}
+
+            result = call_api(query, parameters, client)
+
+            tournaments = result['data']['tournaments']['nodes']
+            # Totalpages doesn't work for stopping because it caps at 999 without mentioning it
+            if tournaments is None:
+                break
+
+            print(i)
+
+            for tournament in tournaments:
+                events = tournament['events']
+                if events is None:
                     continue
-                if not event['isOnline']:
-                    continue
-                if not event['state'] == 'COMPLETED':
-                    continue
-                event_ids.add(event['id'])
-        i += 1
+                for event in events:
+                    # Keep only smash ultimate online matches from completed events
+                    date = datetime.datetime.fromtimestamp(event['createdAt'])
+                    if not event_is_ultimate(event):
+                        continue
+                    if not event['isOnline']:
+                        continue
+                    if not event['state'] == 'COMPLETED':
+                        continue
+                    event_ids.add(event['id'])
+            i += 1
+
+        start_date = next_date
+        next_date = add_months(next_date, 1)
+
     return event_ids
 
 
 def set_is_singles(slots):
     """Check whether a set is in the singles or doubles format based on its slots"""
+    if slots is None:
+        return False
     for slot in slots:
         entrant = slot['entrant']
         try:
@@ -141,8 +182,9 @@ def get_participant_ids(slots):
 
 def parse_selection(selection, id_to_char):
     if selection['entrant'] is None:
-        return None, None
+        return None, None, None
     entrant_id = selection['entrant']['id']
+    entrant_name = selection['entrant']['name']
 
     character_id = selection['selectionValue']
     character_name = None
@@ -151,7 +193,7 @@ def parse_selection(selection, id_to_char):
     else:
         sys.stderr.write('Character with id {} is not in the file\n'.format(character_id))
 
-    return entrant_id, character_name
+    return entrant_id, character_name, entrant_name
 
 
 def update_game_data(games, id_to_char, game_data):
@@ -165,35 +207,32 @@ def update_game_data(games, id_to_char, game_data):
         if game['stage'] is not None:
             stage = game['stage']['name']
 
-
-
         first_selection = True
         entrant1 = None
         char1 = None
         entrant2 = None
         char2 = None
+        entrant1_name = None
+        entrant2_name = None
         for selection in game_selections:
             if selection['selectionType'] != 'CHARACTER':
                 continue
             if first_selection:
-                entrant1, char1 = parse_selection(game_selections[0], id_to_char)
+                entrant1, char1, entrant1_name = parse_selection(game_selections[0], id_to_char)
                 first_selection = False
             else:
-                entrant2, char2 = parse_selection(game_selections[1], id_to_char)
+                entrant2, char2, entrant2_name = parse_selection(game_selections[1], id_to_char)
 
-        if entrant1 == winner:
-            game_data['char1'].append(char1)
-            game_data['char2'].append(char2)
-            game_data['winner'].append(char1)
-            game_data['stage'].append(stage)
-        elif entrant2 == winner:
+        if entrant1 == winner or entrant2 == winner:
             game_data['char1'].append(char1)
             game_data['char2'].append(char2)
             game_data['winner'].append(char2)
             game_data['stage'].append(stage)
+            game_data['entrant1'].append(entrant1_name)
+            game_data['entrant2'].append(entrant2_name)
         else:
             if char1 is not None and char2 is not None:
-                sys.stderr.write('Something went wrong in winner parsing\n')
+                sys.stderr.write('Data from only one player\n')
 
 
     return game_data
@@ -230,11 +269,9 @@ def get_sets_for_events(event_ids: list) -> dict:
                          id
                          entrant {
                            id
-                           name
                          }
                        }
                        games {
-                         id
                          winnerId
                          stage {
                            name
@@ -242,6 +279,7 @@ def get_sets_for_events(event_ids: list) -> dict:
                          selections {
                            entrant {
                              id
+                             name
                              participants {
                                id
                              }
@@ -259,7 +297,9 @@ def get_sets_for_events(event_ids: list) -> dict:
     game_data = {'char1': [],
                  'char2': [],
                  'stage': [],
-                 'winner': []
+                 'winner': [],
+                 'entrant1': [],
+                 'entrant2': [],
                 }
 
     for event_id in event_ids:
@@ -270,7 +310,11 @@ def get_sets_for_events(event_ids: list) -> dict:
             result = call_api(query, parameters, client)
 
             sets = result['data']['event']['sets']['nodes']
-            set_count = result['data']['event']['sets']['pageInfo']['total']
+            set_count = 0
+            try:
+                set_count = result['data']['event']['sets']['pageInfo']['total']
+            except TypeError:
+                break
             if set_count == 0:
                 break
             event_name = result['data']['event']['name']
@@ -296,10 +340,6 @@ def get_sets_for_events(event_ids: list) -> dict:
 
                 game_data = update_game_data(games, id_to_char, game_data)
 
-
-
-
-                # Get characters
             i += 1
             if is_doubles:
                 break

@@ -28,6 +28,7 @@ def add_months(sourcedate, months):
 
 
 def parse_id_to_char_file(in_file):
+    """ Get the id to character mapping from the manually curated id to character file """
     id_to_char = {}
     with open(in_file) as id_to_char_file:
         for line in id_to_char_file:
@@ -52,7 +53,7 @@ def call_api(query, params, client):
 
 
 def event_is_ultimate(event: dict) -> bool:
-    ''' Determine whether an event object returned from smashgg's API is
+    """ Determine whether an event object returned from smashgg's API is
     an event where the players are playing Smash Ultimate
 
     Arguments
@@ -62,7 +63,7 @@ def event_is_ultimate(event: dict) -> bool:
     Returns
     -------
     is_ultimate: Whether the event is a Smash Ultimate event
-    '''
+    """
     try:
         game_id = event['videogame']['id']
         return game_id == ULTIMATE_ID
@@ -76,6 +77,7 @@ def update_start(tournaments):
 
 
 def get_ultimate_events(client):
+    """ Query the smash.gg api to get all the events where people played smash ultimate singles """
     event_ids = set()
     query = '''query TournamentsByVideogame($perPage: Int!, $page: Int!, $video_game: ID! $after: Timestamp!, $before: Timestamp!) {
                 tournaments(query: {
@@ -181,6 +183,9 @@ def get_participant_ids(slots):
 
 
 def parse_selection(selection, id_to_char):
+    """ Find the entrant name, character name, and entrant id associated with a
+    character selection
+    """
     if selection['entrant'] is None:
         return None, None, None
     entrant_id = selection['entrant']['id']
@@ -196,7 +201,8 @@ def parse_selection(selection, id_to_char):
     return entrant_id, character_name, entrant_name
 
 
-def update_game_data(games, id_to_char, game_data):
+def update_game_data(games: dict, id_to_char: dict, game_data: dict) -> dict:
+    """ Parse a set and use the information to update the game_data object """
     for game in games:
         game_selections = game['selections']
         if game_selections is None:
@@ -239,7 +245,7 @@ def update_game_data(games, id_to_char, game_data):
 
 
 def get_sets_for_events(event_ids: list) -> dict:
-    ''' Query each event and download its associated data
+    """ Query each event and download its associated data
 
     Arguments
     ---------
@@ -248,7 +254,7 @@ def get_sets_for_events(event_ids: list) -> dict:
     Returns
     -------
     game_data: The characters, stage, and winners for each game in all events
-    '''
+    """
 
     query = '''query EventSets($eventId: ID!, $page: Int!) {
                  event(id: $eventId) {

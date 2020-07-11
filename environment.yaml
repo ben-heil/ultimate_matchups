@@ -96,6 +96,7 @@ dependencies:
   - prompt_toolkit=3.0.5
   - pthread-stubs=0.4
   - ptyprocess=0.6.0
+  - pulp=1.6.8
   - pycparser=2.20
   - pygments=2.6.1
   - pyopenssl=19.1.0
@@ -115,6 +116,8 @@ dependencies:
   - readline=8.0
   - requests=2.24.0
   - scipy=1.4.1
+  - seaborn=0.10.1
+  - seaborn-base=0.10.1
   - send2trash=1.5.0
   - setuptools=47.3.1
   - six=1.15.0
@@ -141,3 +144,4 @@ dependencies:
     - pyqt5-sip==4.19.18
     - pyqtchart==5.12
     - pyqtwebengine==5.12.1
+

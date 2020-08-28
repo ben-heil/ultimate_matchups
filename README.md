@@ -6,4 +6,4 @@ Be warned, due to the rate limit and the large amount of data being downloaded, 
 The dependencies can be found in the environment.yml file and installed with `conda env create -f environment.yml`.
 If you do not already have conda installed you can find it [here](https://docs.conda.io/en/latest/miniconda.html).
 
-The dataset can also be downloaded [here](https://drive.google.com/file/d/1GFFJWjaj-YkCZ0CrhsLcikse0gf5wFNl/view) to avoid having to wait on the script.
+The dataset can also be downloaded [here](https://drive.google.com/file/d/1A4Ik03h5CrmnevD-VGZ0qtBJT6NjyXOc/view?usp=sharing) to avoid having to wait on the script.

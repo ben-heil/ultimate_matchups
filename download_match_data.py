@@ -230,9 +230,13 @@ def update_game_data(games: dict, id_to_char: dict, game_data: dict) -> dict:
                 entrant2, char2, entrant2_name = parse_selection(game_selections[1], id_to_char)
 
         if entrant1 == winner or entrant2 == winner:
+            if entrant1 == winner:
+                win_char = char1
+            else:
+                win_char = char2
             game_data['char1'].append(char1)
             game_data['char2'].append(char2)
-            game_data['winner'].append(char2)
+            game_data['winner'].append(win_char)
             game_data['stage'].append(stage)
             game_data['entrant1'].append(entrant1_name)
             game_data['entrant2'].append(entrant2_name)
